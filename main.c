@@ -11,13 +11,14 @@
 #include <string.h>
 #include <sys/inotify.h>
 #include <sys/wait.h>
-#include <time.h>
 #include <unistd.h>
 
 #define EXIT_ERROR_CODE 255
 #define MAX_EVENTS 1
 #define EVENT_SIZE (sizeof(struct inotify_event))
 #define BUF_LEN (MAX_EVENTS * (EVENT_SIZE + NAME_MAX))
+#define INOTIFY_EVENT_MASK \
+	IN_CLOSE_WRITE | IN_ATTRIB | IN_CREATE | IN_MOVE | IN_DELETE
 
 #define SIG(x) \
 	{ .number = SIG##x, .name = #x }
@@ -31,6 +32,8 @@ const struct {
 pid_t child = 0;
 int trigger_signal = SIGHUP;
 int verbose = 0;
+const char *event_script = NULL;
+int inotify_fd = 0;
 
 static const char *
 get_sig_name(const int signal) {
@@ -61,13 +64,38 @@ get_sig_number(const char *signal) {
 	return -1;
 }
 
-void
+static void
 sig_handler_forward(int sig) {
 	if (child == 0) {
 		return;
 	}
 
 	kill(child, sig);
+}
+
+static void
+sig_handler_alarm(int sig) {
+	char buffer[BUF_LEN];
+	fd_set rfds;
+	struct timeval tv;
+
+	if (child == 0) {
+		return;
+	}
+
+	if (event_script) {
+		system(event_script);
+	}
+
+	sig_handler_forward(trigger_signal);
+
+	FD_ZERO(&rfds);
+	FD_SET(inotify_fd, &rfds);
+	tv.tv_sec = 0;
+	tv.tv_usec = 0;
+	while (select(1, &rfds, NULL, NULL, &tv) > 0) {
+		read(inotify_fd, buffer, BUF_LEN);
+	}
 }
 
 static void
@@ -80,7 +108,7 @@ sig_handler_child(int sig) {
 	exit(status);
 }
 
-int
+static int
 list_signals() {
 	int i;
 	for (i = 0; signals[i].number != 0; i++) {
@@ -91,10 +119,11 @@ list_signals() {
 	return EXIT_SUCCESS;
 }
 
-int
+static int
 usage(char *arg0) {
 	fprintf(stderr,
-			"usage: %s [-s signal] [-v] [path ...] -- command [argument ...]\n",
+			"usage: %s [-s signal] [-e script] [-v] [path ...] -- command "
+			"[argument ...]\n",
 			arg0);
 	fprintf(stderr, "       %s -l\n", arg0);
 	return EXIT_ERROR_CODE;
@@ -103,17 +132,19 @@ usage(char *arg0) {
 int
 main(int argc, char **argv) {
 	int rv;
-	int inotify_fd;
 	char buffer[BUF_LEN];
 	const char *observed = argv[1];
 	int opt;
 
 	inotify_fd = inotify_init();
 
-	while ((opt = getopt(argc, argv, "-s:lvV")) != -1) {
+	while ((opt = getopt(argc, argv, "-s:e:lvV")) != -1) {
 		switch (opt) {
 		case 'l':
 			return list_signals();
+		case 'e':
+			event_script = optarg;
+			break;
 		case 's':
 			rv = atoi(optarg);
 			if (rv == 0) {
@@ -132,7 +163,7 @@ main(int argc, char **argv) {
 			verbose++;
 			break;
 		case 1:
-			rv = inotify_add_watch(inotify_fd, optarg, IN_ALL_EVENTS);
+			rv = inotify_add_watch(inotify_fd, optarg, INOTIFY_EVENT_MASK);
 			if (rv < 0) {
 				perror(observed);
 				return EXIT_ERROR_CODE;
@@ -147,6 +178,7 @@ main(int argc, char **argv) {
 	}
 
 	signal(SIGCHLD, sig_handler_child);
+	signal(SIGALRM, sig_handler_alarm);
 
 	child = fork();
 	if (child < 0) {
@@ -176,7 +208,7 @@ main(int argc, char **argv) {
 				fprintf(stderr, "DEBUG: sending signal %s to child process\n",
 						get_sig_name(trigger_signal));
 			}
-			sig_handler_forward(trigger_signal);
+			alarm(1);
 		}
 		return EXIT_ERROR_CODE;
 	}
