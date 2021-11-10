@@ -5,7 +5,7 @@
 ######################################################################
 
 CFLAGS ?= -Wall -Wpedantic -Werror
-VERSION ?= 0.1
+VERSION ?= 0.2
 
 ifeq ($(STATIC),1)
     LDFLAGS += -static
