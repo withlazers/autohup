@@ -4,7 +4,7 @@
 # @created     : Tuesday Nov 09, 2021 18:51:02 CET
 ######################################################################
 
-CFLAGS ?= -Wall -Wpedantic -Werror
+CFLAGS ?= -Wall -Wpedantic -Werror -Os
 VERSION ?= 0.1
 
 ifeq ($(STATIC),1)
