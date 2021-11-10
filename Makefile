@@ -4,7 +4,7 @@
 # @created     : Tuesday Nov 09, 2021 18:51:02 CET
 ######################################################################
 
-CFLAGS ?= -Wall -Wpedantic -Werror -Os
+CFLAGS ?= -Wall -Wpedantic -Werror
 VERSION ?= 0.1
 
 ifeq ($(STATIC),1)
@@ -13,6 +13,8 @@ endif
 
 ifeq ($(DEBUG),1)
     LDFLAGS += -g
+else
+	CFLAGS += -O2
 endif
 
 ifeq ($(STRIP),1)
