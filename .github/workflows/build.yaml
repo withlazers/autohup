@@ -4,17 +4,14 @@ on:
 jobs:
   build:
     runs-on: ubuntu-latest
-    container: tsl0922/musl-cross
+    container: alpine:3.14
     steps:
     - uses: actions/checkout@v2
     - name: install deps
       run: |
         apk add make gcc musl-dev
     - name: make
-      run: |
-        for p in i386 x86_64 aarch64 arm armhf mips mipsel; do
-          make DEBUG=0 STATIC=1 STRIP=1
-        done
+      run: make DEBUG=0 STATIC=1 STRIP=1
     - name: irc notice
       uses: Gottox/irc-message-action@v2
       if: failure()
