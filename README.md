@@ -1,5 +1,7 @@
 # autohup
-automaticly sends SIGHUP to a process when a file changes.
+
+automaticly sends SIGHUP to a process when a file changes. This is handy for
+containers that need to reload configuration as they change.
 
 ## usage
 
@@ -30,7 +32,7 @@ $ autohup -s term /etc/daemon.d /var/lib/daemon -- daemon
 Optionally an event script can be defined, that runs right before an event is
 sent
 ```
-$ autohup -e 'echo preparing...' /etc/daemon.d -- daemon
+$ autohup -e 'cat /etc/daemon.d/* > /etc/daemon.conf' /etc/daemon.d -- daemon
 ```
 
 To list all signals autohup can send use this command:
@@ -40,5 +42,11 @@ $ autohup -l
 
 Signals can also be defined as numbers
 ```
-$ autohup /etc/daemon.d -s 10 -- daemon # 10 = SIGUSR2
+$ autohup -s 10 /etc/daemon.d -- daemon # 10 = SIGUSR2
 ```
+
+## bugs
+
+`autohup` has a debouncing mechanism which sends the signal after 1 second with
+no file change. This means that if you're constantly changing files, the signal
+will never be sent.

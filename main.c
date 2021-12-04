@@ -29,11 +29,31 @@ const struct {
 			   SIG(URG),  SIG(USR1), SIG(USR2), SIG(WINCH), {0}};
 #undef SIG
 
-pid_t child = 0;
+pid_t observed_pid = 0, event_script_pid = 0;
+int observed_exit_status = 0;
 int trigger_signal = SIGHUP;
 int verbose = 0;
 const char *event_script = NULL;
 int inotify_fd = 0;
+
+static void
+wait_for_children(int options) {
+	for (int pid, status; (pid = waitpid(-1, &status, options)) > 0;) {
+		if (pid == event_script_pid) {
+			event_script_pid = 0;
+			if (observed_pid != 0) {
+				break;
+			}
+		} else if (pid == observed_pid) {
+			observed_pid = 0;
+			observed_exit_status = status;
+		}
+	}
+
+	if (observed_pid == 0 && event_script_pid == 0) {
+		exit(observed_exit_status);
+	}
+}
 
 static const char *
 get_sig_name(const int signal) {
@@ -65,28 +85,49 @@ get_sig_number(const char *signal) {
 }
 
 static void
-sig_handler_forward(int sig) {
-	if (child == 0) {
+sig_handler_forward(const int sig) {
+	if (observed_pid == 0) {
 		return;
 	}
 
-	kill(child, sig);
+	kill(observed_pid, sig);
 }
 
 static void
-sig_handler_alarm(int sig) {
+exec_event_script() {
+	if (event_script == NULL) {
+		return;
+	}
+	// We do not use system(3) here as it interferes with SIGCHLD
+	event_script_pid = fork();
+	if (event_script_pid == 0) {
+		execl("/bin/sh", "/bin/sh", "-c", event_script, NULL);
+	} else if (event_script_pid < 0) {
+		perror("event script");
+	} else {
+		wait_for_children(0);
+	}
+}
+
+static void
+sig_handler_alarm(const int sig) {
 	char buffer[BUF_LEN];
 	fd_set rfds;
 	struct timeval tv;
 
-	if (child == 0) {
+	if (observed_pid == 0) {
 		return;
 	}
 
-	if (event_script) {
-		system(event_script);
+	if (verbose) {
+		fputs("DEBUG: executing event script\n", stderr);
 	}
+	exec_event_script();
 
+	if (verbose) {
+		fprintf(stderr, "DEBUG: sending signal %s to child process\n",
+				get_sig_name(trigger_signal));
+	}
 	sig_handler_forward(trigger_signal);
 
 	FD_ZERO(&rfds);
@@ -99,13 +140,8 @@ sig_handler_alarm(int sig) {
 }
 
 static void
-sig_handler_child(int sig) {
-	int status;
-
-	while (waitpid(-1, &status, WNOHANG) > 0) {
-	}
-
-	exit(status);
+sig_handler_child(const int sig) {
+	wait_for_children(WNOHANG);
 }
 
 static int
@@ -120,7 +156,7 @@ list_signals() {
 }
 
 static int
-usage(char *arg0) {
+usage(const char *arg0) {
 	fprintf(stderr,
 			"usage: %s [-s signal] [-e script] [-v] [path ...] -- command "
 			"[argument ...]\n",
@@ -133,7 +169,6 @@ int
 main(int argc, char **argv) {
 	int rv;
 	char buffer[BUF_LEN];
-	const char *observed = argv[1];
 	int opt;
 
 	inotify_fd = inotify_init();
@@ -165,7 +200,7 @@ main(int argc, char **argv) {
 		case 1:
 			rv = inotify_add_watch(inotify_fd, optarg, INOTIFY_EVENT_MASK);
 			if (rv < 0) {
-				perror(observed);
+				perror(optarg);
 				return EXIT_ERROR_CODE;
 			}
 			break;
@@ -180,10 +215,10 @@ main(int argc, char **argv) {
 	signal(SIGCHLD, sig_handler_child);
 	signal(SIGALRM, sig_handler_alarm);
 
-	child = fork();
-	if (child < 0) {
+	observed_pid = fork();
+	if (observed_pid < 0) {
 		perror(argv[2]);
-	} else if (child == 0) {
+	} else if (observed_pid == 0) {
 		argv += optind;
 		execvp(argv[0], argv);
 		perror(argv[0]);
@@ -205,7 +240,8 @@ main(int argc, char **argv) {
 			}
 
 			if (verbose) {
-				fprintf(stderr, "DEBUG: sending signal %s to child process\n",
+				fprintf(stderr,
+						"DEBUG: scheduled sending %s to child process\n",
 						get_sig_name(trigger_signal));
 			}
 			alarm(1);
