@@ -29,7 +29,7 @@ Beware that the `SIG...` prefix is optional and the option is case insensite.
 $ autohup -s term /etc/daemon.d /var/lib/daemon -- daemon
 ```
 
-Optionally an event script can be defined, that runs right before an event is
+Optionally an event script can be defined, that runs right before a signal is
 sent
 ```
 $ autohup -e 'cat /etc/daemon.d/* > /etc/daemon.conf' /etc/daemon.d -- daemon
